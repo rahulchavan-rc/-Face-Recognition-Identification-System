@@ -1,5 +1,7 @@
 """Evaluate identification accuracy on a folder of person-labeled images."""
 
+from __future__ import annotations
+
 import argparse
 from pathlib import Path
 
@@ -44,16 +46,20 @@ def identify(
     return (name if score >= threshold else "Unknown"), score
 
 
-def evaluate(dataset: str, threshold: float, unknown_dataset: str | None = None) -> None:
+def evaluate_dataset(dataset: str, threshold: float = 0.45, unknown_dataset: str | None = None) -> dict[str, object]:
     model = FaceModel()
     all_embeddings = load_embeddings(model, Path(dataset))
     total = correct = unknown = 0
+    details: list[dict[str, object]] = []
 
     for expected_name, person_embeddings in all_embeddings.items():
         for query_index, query in enumerate(person_embeddings):
-            # Leave the query out of the reference set to avoid testing an image against itself.
             references = {
-                name: [embedding for index, embedding in enumerate(items) if not (name == expected_name and index == query_index)]
+                name: [
+                    embedding
+                    for index, embedding in enumerate(items)
+                    if not (name == expected_name and index == query_index)
+                ]
                 for name, items in all_embeddings.items()
             }
             references = {name: items for name, items in references.items() if items}
@@ -61,31 +67,73 @@ def evaluate(dataset: str, threshold: float, unknown_dataset: str | None = None)
             total += 1
             correct += predicted_name == expected_name
             unknown += predicted_name == "Unknown"
-            print(f"expected={expected_name}, predicted={predicted_name}, similarity={score:.3f}")
+            details.append(
+                {
+                    "expected": expected_name,
+                    "predicted": predicted_name,
+                    "similarity": round(float(score), 3),
+                }
+            )
 
     accuracy = correct / total if total else 0.0
     unknown_rate = unknown / total if total else 0.0
-    print(f"Known samples: {total}")
-    print(f"Correct identifications: {correct}")
-    print(f"Accuracy: {accuracy:.2%}")
-    print(f"Rejected as Unknown: {unknown} ({unknown_rate:.2%})")
-    print(f"Threshold: {threshold:.3f}")
+
+    result: dict[str, object] = {
+        "known_samples": total,
+        "correct_identifications": correct,
+        "accuracy": round(float(accuracy), 4),
+        "rejected_as_unknown": unknown,
+        "unknown_rate": round(float(unknown_rate), 4),
+        "false_rejection_rate": round(float(unknown_rate), 4),
+        "threshold": float(threshold),
+        "details": details,
+    }
 
     if unknown_dataset:
         unknown_embeddings = load_embeddings(model, Path(unknown_dataset))
         unknown_total = 0
         correctly_rejected = 0
+        unknown_details: list[dict[str, object]] = []
         for person_embeddings in unknown_embeddings.values():
             for query in person_embeddings:
                 predicted_name, score = identify(query, all_embeddings, threshold)
                 unknown_total += 1
                 correctly_rejected += predicted_name == "Unknown"
-                print(f"expected=Unknown, predicted={predicted_name}, similarity={score:.3f}")
-
+                unknown_details.append(
+                    {
+                        "expected": "Unknown",
+                        "predicted": predicted_name,
+                        "similarity": round(float(score), 3),
+                    }
+                )
         rejection_rate = correctly_rejected / unknown_total if unknown_total else 0.0
-        print(f"Unknown samples: {unknown_total}")
-        print(f"Correctly rejected Unknown samples: {correctly_rejected}")
-        print(f"Unknown rejection rate: {rejection_rate:.2%}")
+        result["unknown_samples"] = unknown_total
+        result["correctly_rejected_unknown_samples"] = correctly_rejected
+        result["unknown_rejection_rate"] = round(float(rejection_rate), 4)
+        result["false_acceptance_rate"] = round(
+            float((unknown_total - correctly_rejected) / unknown_total)
+            if unknown_total
+            else 0.0,
+            4,
+        )
+        result["unknown_details"] = unknown_details
+
+    return result
+
+
+def evaluate(dataset: str, threshold: float, unknown_dataset: str | None = None) -> None:
+    result = evaluate_dataset(dataset, threshold, unknown_dataset)
+    print(f"Known samples: {result['known_samples']}")
+    print(f"Correct identifications: {result['correct_identifications']}")
+    print(f"Accuracy: {result['accuracy']:.2%}")
+    print(f"Rejected as Unknown: {result['rejected_as_unknown']} ({result['unknown_rate']:.2%})")
+    print(f"False rejection rate: {result['false_rejection_rate']:.2%}")
+    print(f"Threshold: {result['threshold']:.3f}")
+    if unknown_dataset:
+        print(f"Unknown samples: {result['unknown_samples']}")
+        print(f"Correctly rejected Unknown samples: {result['correctly_rejected_unknown_samples']}")
+        print(f"Unknown rejection rate: {result['unknown_rejection_rate']:.2%}")
+        print(f"False acceptance rate: {result['false_acceptance_rate']:.2%}")
 
 
 def main() -> None:

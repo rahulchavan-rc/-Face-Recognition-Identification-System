@@ -1,0 +1,25 @@
+Input image/webcam
+        ↓
+Detect face
+        ↓
+Generate face embedding
+        ↓
+Compare with enrolled embeddings
+        ↓
+Similarity above threshold?
+   Yes → Show person name
+   No  → Show "Unknown"
+   Why ArcFace?
+High face-recognition accuracy
+Produces reliable face embeddings
+Works well with different lighting and face angles
+Supports similarity-based matching
+Suitable for identifying known people and rejecting unknown faces
+Suggested Technology Stack
+Face detection: RetinaFace or SCRFD
+Face embedding: ArcFace
+Similarity: Cosine similarity
+Database: SQLite or JSON
+Programming language: Python
+Library: insightface
+buffalo_l#for face dec#

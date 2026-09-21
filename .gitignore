@@ -1,6 +1,46 @@
-venv/
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Exported embeddings (large binary files)
+database/embeddings/*.npy
+
+# Evaluation results (generated output)
+evaluation/results.json
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.env
+
+# macOS
 .DS_Store
-faces.db
-unknown_faces/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# InsightFace model cache
+~/.insightface/
+
+# Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log

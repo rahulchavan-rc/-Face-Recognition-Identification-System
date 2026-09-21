@@ -1,205 +1,257 @@
-"""Enroll faces or inspect SCRFD detections and ArcFace embeddings."""
+"""
+main.py
+-------
+Command-line interface for the Face Recognition Identification System.
+
+Usage examples
+--------------
+Enroll one person (one or more images):
+    python main.py enroll --name "Alice" --image data/enrolled/alice/alice1.jpg
+    python main.py enroll --name "Alice" --image data/enrolled/alice/alice1.jpg data/enrolled/alice/alice2.jpg
+
+Bulk-enroll a dataset folder (one sub-folder per person):
+    python main.py enroll-dataset --dataset data/enrolled
+
+Identify faces in an image:
+    python main.py recognize --image data/test/test1.jpg
+    python main.py recognize --image data/test/test1.jpg --threshold 0.50
+
+Start real-time webcam recognition:
+    python main.py webcam
+    python main.py webcam --threshold 0.50 --camera 0
+
+Inspect raw detection/embedding output (diagnostic):
+    python main.py inspect --image data/test/test1.jpg
+"""
+
+from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-import cv2
-import numpy as np
-
+from config import DB_PATH, DEFAULT_CAMERA, MATCH_THRESHOLD
 from database import FaceDatabase
-from face_model import FaceModel
-from matcher import FaceMatcher
+from src.detector import FaceDetector
+from src.embedder import FaceEmbedder
+from src.enrollment import FaceEnroller, enroll_dataset_folder
+from src.recognition import identify_image, run_webcam
+from src.utils import eprint, format_result
 
 
-def inspect_image(model: FaceModel, image: str) -> None:
-    faces = model.detect_and_embed_file(image)
+# ---------------------------------------------------------------------------
+# Shared model initialisation (lazy, happens once per command)
+# ---------------------------------------------------------------------------
 
-    print(f"Detected faces: {len(faces)}")
-    for index, face in enumerate(faces, start=1):
-        print(
-            f"Face {index}: detection_score={face.detection_score:.3f}, "
-            f"embedding_dimensions={face.embedding.shape[0]}"
-        )
-
-
-def enroll_person(model: FaceModel, database: FaceDatabase, name: str, images: list[str]) -> None:
-    embeddings: list[np.ndarray] = []
-    for image in images:
-        faces = model.detect_and_embed_file(image)
-        if len(faces) != 1:
-            raise ValueError(
-                f"Enrollment image '{image}' must contain exactly one face; found {len(faces)}."
-            )
-        embeddings.append(faces[0].embedding)
-
-    # Averaging several clear photos creates a more stable reference for this person.
-    reference = np.mean(np.vstack(embeddings), axis=0)
-    database.save(name, reference)
-    print(f"Enrolled '{name}' using {len(images)} image(s).")
+def _load_models() -> tuple[FaceDetector, FaceEmbedder]:
+    """Load and return the face detector and embedder."""
+    print("Loading face detection and recognition models…")
+    detector = FaceDetector()
+    embedder = FaceEmbedder()
+    print("Models ready.")
+    return detector, embedder
 
 
-def enroll_dataset(model: FaceModel, database: FaceDatabase, dataset: str) -> None:
-    """Enroll each person from a dataset organized as dataset/person/images."""
-    dataset_path = Path(dataset)
-    if not dataset_path.is_dir():
-        raise FileNotFoundError(f"Dataset folder not found: {dataset}")
+# ---------------------------------------------------------------------------
+# Command handlers
+# ---------------------------------------------------------------------------
 
-    image_suffixes = {".jpg", ".jpeg", ".png", ".bmp"}
-    people = sorted(path for path in dataset_path.iterdir() if path.is_dir())
-    if not people:
-        raise ValueError(f"No person folders found in dataset: {dataset}")
+def cmd_enroll(args: argparse.Namespace) -> None:
+    """Enroll a single person from one or more image files."""
+    db = FaceDatabase(args.database)
+    detector, embedder = _load_models()
+    enroller = FaceEnroller(db, detector, embedder)
 
-    for person_folder in people:
-        image_paths = sorted(
-            path for path in person_folder.iterdir() if path.suffix.lower() in image_suffixes
-        )
-        if not image_paths:
-            print(f"Skipping '{person_folder.name}': no supported images found.")
-            continue
+    image_paths = [Path(p) for p in args.image]
+    print(f"\nEnrolling '{args.name}' from {len(image_paths)} image(s)…")
 
-        valid_embeddings: list[np.ndarray] = []
-        failed_images: list[str] = []
-        for image_path in image_paths:
-            faces = model.detect_and_embed_file(image_path)
-            if len(faces) == 1:
-                valid_embeddings.append(faces[0].embedding)
-            else:
-                failed_images.append(f"{image_path.name} ({len(faces)} faces)")
+    try:
+        summary = enroller.enroll_from_paths(args.name, image_paths)
+    except Exception as exc:  # noqa: BLE001
+        eprint(f"ERROR: {exc}")
+        sys.exit(1)
 
-        if not valid_embeddings:
-            print(f"Skipping '{person_folder.name}': no valid face images.")
-            continue
-
-        # Multiple images reduce the effect of pose and lighting in one photo.
-        reference = np.mean(np.vstack(valid_embeddings), axis=0)
-        database.save(person_folder.name, reference)
-        print(
-            f"Enrolled '{person_folder.name}' with "
-            f"{len(valid_embeddings)}/{len(image_paths)} image(s)."
-        )
-        if failed_images:
-            print(f"  Skipped: {', '.join(failed_images)}")
+    print(f"  ✓ Enrolled '{summary['person']}'")
+    print(f"  Accepted images : {summary['accepted']}")
+    print(f"  Rejected images : {len(summary['rejected'])}")
+    if summary["rejected"]:
+        for msg in summary["rejected"]:
+            print(f"    - {msg}")
+    print(f"  Embedding saved : {summary['npy_path']}")
+    print(f"  Embedding dim   : {summary['embedding_dim']}")
 
 
-def identify_image(
-    model: FaceModel,
-    database: FaceDatabase,
-    image: str,
-    threshold: float,
-) -> None:
-    faces = model.detect_and_embed_file(image)
-    matcher = FaceMatcher(database, threshold=threshold)
+def cmd_enroll_dataset(args: argparse.Namespace) -> None:
+    """Bulk-enroll all person folders found in a dataset directory."""
+    db = FaceDatabase(args.database)
+    detector, embedder = _load_models()
 
-    if not faces:
-        print("No face detected.")
+    print(f"\nBulk-enrolling dataset from: {args.dataset}")
+    try:
+        results = enroll_dataset_folder(args.dataset, db, detector, embedder)
+    except (FileNotFoundError, ValueError) as exc:
+        eprint(f"ERROR: {exc}")
+        sys.exit(1)
+
+    print(f"\nDataset enrollment complete.  Enrolled {len(results)} person(s).")
+
+
+def cmd_recognize(args: argparse.Namespace) -> None:
+    """Identify faces in an image file."""
+    db = FaceDatabase(args.database)
+    detector, embedder = _load_models()
+
+    print(f"\nRecognizing faces in: {args.image}")
+    print(f"Threshold: {args.threshold:.3f}")
+
+    try:
+        results = identify_image(args.image, db, detector, embedder, args.threshold)
+    except (FileNotFoundError, ValueError) as exc:
+        eprint(f"ERROR: {exc}")
+        sys.exit(1)
+
+    if not results:
+        print("\nNo face detected in the image.")
         return
 
-    for index, face in enumerate(faces, start=1):
-        result = matcher.match(face.embedding)
+    print(f"\nDetected {len(results)} face(s):")
+    for i, face in enumerate(results, start=1):
+        line = format_result(face.match.name, face.match.similarity, args.threshold)
+        print(f"  Face {i}: {line}")
+
+
+def cmd_webcam(args: argparse.Namespace) -> None:
+    """Launch real-time webcam recognition."""
+    db = FaceDatabase(args.database)
+    detector, embedder = _load_models()
+
+    try:
+        run_webcam(
+            database=db,
+            detector=detector,
+            embedder=embedder,
+            threshold=args.threshold,
+            camera_index=args.camera,
+        )
+    except RuntimeError as exc:
+        eprint(f"ERROR: {exc}")
+        sys.exit(1)
+
+
+def cmd_inspect(args: argparse.Namespace) -> None:
+    """Diagnostic: show raw detection scores and embedding dimensions."""
+    detector, embedder = _load_models()
+
+    try:
+        faces = detector.detect_file(args.image)
+    except FileNotFoundError as exc:
+        eprint(f"ERROR: {exc}")
+        sys.exit(1)
+
+    print(f"\nImage: {args.image}")
+    print(f"Detected faces: {len(faces)}")
+
+    for i, face in enumerate(faces, start=1):
+        try:
+            emb = embedder.embed(face)
+            dim = emb.shape[0]
+            emb_info = f"dim={dim}, norm={float(emb @ emb):.4f}"
+        except Exception as exc:  # noqa: BLE001
+            emb_info = f"embedding failed: {exc}"
+
+        left, top, right, bottom = (int(v) for v in face.bbox)
         print(
-            f"Face {index}: {result.name} "
-            f"(similarity={result.similarity:.3f}, threshold={threshold:.3f})"
+            f"  Face {i}: bbox=({left},{top},{right},{bottom})  "
+            f"score={face.detection_score:.3f}  {emb_info}"
         )
 
 
-def identify_webcam(model: FaceModel, database: FaceDatabase, camera: int, threshold: float) -> None:
-    capture = cv2.VideoCapture(camera)
-    if not capture.isOpened():
-        raise RuntimeError(f"Could not open camera {camera}.")
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
 
-    matcher = FaceMatcher(database, threshold=threshold)
-    print("Webcam started. Press q to quit.")
-    try:
-        while True:
-            success, frame = capture.read()
-            if not success:
-                print("Could not read a frame from the webcam.")
-                break
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="main.py",
+        description="Face Recognition Identification System  —  ArcFace + SCRFD",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "--database",
+        default=str(DB_PATH),
+        help="Path to the SQLite database (default: faces.db)",
+    )
 
-            for face in model.detect_and_embed(frame):
-                result = matcher.match(face.embedding)
-                left, top, right, bottom = (int(value) for value in face.bbox)
-                color = (0, 180, 0) if not result.is_unknown else (0, 0, 255)
-                cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-                label = f"{result.name} {result.similarity:.2f}"
-                cv2.putText(
-                    frame,
-                    label,
-                    (left, max(25, top - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    color,
-                    2,
-                )
+    sub = parser.add_subparsers(dest="command", required=True)
 
-            cv2.imshow("ArcFace Recognition", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-    finally:
-        capture.release()
-        cv2.destroyAllWindows()
+    # ---- enroll -----------------------------------------------------------
+    enroll_p = sub.add_parser("enroll", help="Enroll a person from face image(s)")
+    enroll_p.add_argument("--name", required=True, help="Person's display name")
+    enroll_p.add_argument(
+        "--image", nargs="+", required=True,
+        metavar="IMAGE", help="One or more face image paths"
+    )
+    enroll_p.add_argument("--database", default=str(DB_PATH))
 
+    # ---- enroll-dataset ---------------------------------------------------
+    ds_p = sub.add_parser(
+        "enroll-dataset",
+        help="Bulk-enroll a dataset folder (one sub-folder per person)",
+    )
+    ds_p.add_argument("--dataset", required=True, help="Root dataset directory")
+    ds_p.add_argument("--database", default=str(DB_PATH))
+
+    # ---- recognize --------------------------------------------------------
+    rec_p = sub.add_parser("recognize", help="Identify faces in an image")
+    rec_p.add_argument("--image", required=True, help="Path to the input image")
+    rec_p.add_argument(
+        "--threshold", type=float, default=MATCH_THRESHOLD,
+        help=f"Match threshold (default: {MATCH_THRESHOLD})",
+    )
+    rec_p.add_argument("--database", default=str(DB_PATH))
+
+    # ---- webcam -----------------------------------------------------------
+    web_p = sub.add_parser("webcam", help="Real-time webcam recognition")
+    web_p.add_argument(
+        "--camera", type=int, default=DEFAULT_CAMERA,
+        help=f"Camera index (default: {DEFAULT_CAMERA})",
+    )
+    web_p.add_argument(
+        "--threshold", type=float, default=MATCH_THRESHOLD,
+        help=f"Match threshold (default: {MATCH_THRESHOLD})",
+    )
+    web_p.add_argument("--database", default=str(DB_PATH))
+
+    # ---- inspect ----------------------------------------------------------
+    ins_p = sub.add_parser("inspect", help="Diagnostic: show raw face detection output")
+    ins_p.add_argument("--image", required=True, help="Path to the input image")
+
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    inspect_parser = subparsers.add_parser("inspect", help="Detect faces in one image")
-    inspect_parser.add_argument("image")
-
-    enroll_parser = subparsers.add_parser("enroll", help="Store a person's face embedding")
-    enroll_parser.add_argument("name")
-    enroll_parser.add_argument("images", nargs="+", help="One or more clear face images")
-    enroll_parser.add_argument("--database", default="faces.db")
-
-    dataset_parser = subparsers.add_parser(
-        "enroll-dataset", help="Enroll person folders from a dataset directory"
-    )
-    dataset_parser.add_argument("dataset", help="Folder containing one folder per person")
-    dataset_parser.add_argument("--database", default="faces.db")
-
-    identify_parser = subparsers.add_parser(
-        "identify", help="Identify faces or reject them as Unknown"
-    )
-    identify_parser.add_argument("image")
-    identify_parser.add_argument("--database", default="faces.db")
-    identify_parser.add_argument(
-        "--threshold",
-        type=float,
-        default=0.45,
-        help="Minimum cosine similarity required for identification",
-    )
-
-    webcam_parser = subparsers.add_parser(
-        "webcam", help="Identify faces using a live webcam"
-    )
-    webcam_parser.add_argument("--camera", type=int, default=0)
-    webcam_parser.add_argument("--database", default="faces.db")
-    webcam_parser.add_argument("--threshold", type=float, default=0.45)
-
+    parser = build_parser()
     args = parser.parse_args()
-    model = FaceModel()
 
-    if args.command == "inspect":
-        inspect_image(model, args.image)
-    elif args.command == "enroll":
-        enroll_person(model, FaceDatabase(args.database), args.name, args.images)
-    elif args.command == "enroll-dataset":
-        enroll_dataset(model, FaceDatabase(args.database), args.dataset)
-    elif args.command == "identify":
-        identify_image(
-            model,
-            FaceDatabase(args.database),
-            args.image,
-            args.threshold,
-        )
-    else:
-        identify_webcam(
-            model,
-            FaceDatabase(args.database),
-            args.camera,
-            args.threshold,
-        )
+    # Route to the correct handler.
+    dispatch = {
+        "enroll": cmd_enroll,
+        "enroll-dataset": cmd_enroll_dataset,
+        "recognize": cmd_recognize,
+        "webcam": cmd_webcam,
+        "inspect": cmd_inspect,
+    }
+    handler = dispatch.get(args.command)
+    if handler is None:
+        parser.print_help()
+        sys.exit(1)
+
+    handler(args)
 
 
 if __name__ == "__main__":

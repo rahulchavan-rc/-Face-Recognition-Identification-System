@@ -1,16 +1,30 @@
-"""ArcFace embeddings and SCRFD face detection via InsightFace."""
+"""
+face_model.py  (compatibility shim)
+====================================
+This module is kept for backward compatibility with the FastAPI backend
+(backend/api/main.py) and the evaluation script (evaluate.py) that import
+from it directly.
 
-from dataclasses import dataclass
+It re-exports ``FaceModel`` — a thin wrapper that combines ``FaceDetector``
+and ``FaceEmbedder`` from the new ``src/`` package into the same single-class
+interface that the rest of the codebase already expects.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from pathlib import Path
 
-import cv2
 import numpy as np
-from insightface.app import FaceAnalysis
+
+from src.detector import FaceDetector
+from src.embedder import FaceEmbedder
+from config import DET_SIZE, EXECUTION_PROVIDER, MODEL_NAME
 
 
 @dataclass
 class DetectedFace:
-    """A detected face and its normalized ArcFace embedding."""
+    """Backward-compatible detected-face container."""
 
     bbox: tuple[float, float, float, float]
     detection_score: float
@@ -18,44 +32,53 @@ class DetectedFace:
 
 
 class FaceModel:
-    """Load SCRFD and ArcFace, then detect faces and generate embeddings."""
+    """
+    Combined face detection + embedding model (SCRFD + ArcFace).
+
+    This class provides the same API as the original ``face_model.FaceModel``
+    so that existing code requires no changes.
+
+    Model
+    -----
+    - **Detector**: SCRFD (part of InsightFace ``buffalo_l``)
+    - **Embedder**: ArcFace ResNet-100 (pretrained on MS1MV3)
+    - **Embedding dim**: 512
+    - **Runtime**: ONNX Runtime (CPU by default)
+    """
 
     def __init__(
         self,
-        model_name: str = "buffalo_l",
-        det_size: tuple[int, int] = (640, 640),
+        model_name: str = MODEL_NAME,
+        det_size: tuple[int, int] = DET_SIZE,
     ) -> None:
-        self.app = FaceAnalysis(
-            name=model_name,
-            providers=["CPUExecutionProvider"],
+        self._detector = FaceDetector(
+            model_name=model_name,
+            det_size=det_size,
+            provider=EXECUTION_PROVIDER,
         )
-        self.app.prepare(ctx_id=0, det_size=det_size)
+        self._embedder = FaceEmbedder()
 
     def detect_and_embed(self, image: np.ndarray) -> list[DetectedFace]:
-        """Detect every face in a BGR image and return ArcFace embeddings."""
-        if image is None or image.size == 0:
-            raise ValueError("The image is empty.")
-
-        detected_faces = self.app.get(image)
+        """Detect faces and return their ArcFace embeddings."""
+        raw_faces = self._detector.detect(image)
         results: list[DetectedFace] = []
-        for face in detected_faces:
-            embedding = np.asarray(face.embedding, dtype=np.float32)
-            norm = np.linalg.norm(embedding)
-            if norm == 0:
+        for face in raw_faces:
+            try:
+                emb = self._embedder.embed(face)
+            except (ValueError, RuntimeError):
                 continue
-
-            normalized_embedding = embedding / norm
             results.append(
                 DetectedFace(
-                    bbox=tuple(float(value) for value in face.bbox),
-                    detection_score=float(face.det_score),
-                    embedding=normalized_embedding,
+                    bbox=face.bbox,
+                    detection_score=face.detection_score,
+                    embedding=emb,
                 )
             )
         return results
 
     def detect_and_embed_file(self, image_path: str | Path) -> list[DetectedFace]:
         """Read an image file and return detected faces with embeddings."""
+        import cv2
         image = cv2.imread(str(image_path))
         if image is None:
             raise FileNotFoundError(f"Could not read image: {image_path}")

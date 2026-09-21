@@ -1,0 +1,94 @@
+{
+  "_note": "This file is auto-generated during enrollment. Each enrolled person gets one entry.",
+  "_schema": {
+    "name": "Display name stored in the database",
+    "sample_count": "Number of face images used to compute the reference embedding",
+    "embedding_dim": "Dimension of the ArcFace embedding vector (always 512)",
+    "npy_file": "Relative path to the exported .npy embedding file",
+    "enrolled_at": "ISO 8601 UTC timestamp of enrollment"
+  },
+  "amar": {
+    "name": "amar",
+    "sample_count": 3,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/amar.npy",
+    "enrolled_at": "2026-09-21T11:58:24.179867+00:00"
+  },
+  "amrut": {
+    "name": "amrut",
+    "sample_count": 3,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/amrut.npy",
+    "enrolled_at": "2026-09-21T11:58:24.957970+00:00"
+  },
+  "ashu": {
+    "name": "ashu",
+    "sample_count": 7,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/ashu.npy",
+    "enrolled_at": "2026-09-21T11:58:26.667042+00:00"
+  },
+  "chait": {
+    "name": "chait",
+    "sample_count": 6,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/chait.npy",
+    "enrolled_at": "2026-09-21T11:58:27.939927+00:00"
+  },
+  "chandu": {
+    "name": "chandu",
+    "sample_count": 5,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/chandu.npy",
+    "enrolled_at": "2026-09-21T11:58:29.328203+00:00"
+  },
+  "kartik": {
+    "name": "kartik",
+    "sample_count": 4,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/kartik.npy",
+    "enrolled_at": "2026-09-21T11:58:30.266803+00:00"
+  },
+  "mantu": {
+    "name": "mantu",
+    "sample_count": 2,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/mantu.npy",
+    "enrolled_at": "2026-09-21T11:58:30.865898+00:00"
+  },
+  "modi": {
+    "name": "modi",
+    "sample_count": 4,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/modi.npy",
+    "enrolled_at": "2026-09-21T11:58:31.841325+00:00"
+  },
+  "neeru": {
+    "name": "neeru",
+    "sample_count": 4,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/neeru.npy",
+    "enrolled_at": "2026-09-21T11:58:34.094760+00:00"
+  },
+  "pradu": {
+    "name": "pradu",
+    "sample_count": 3,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/pradu.npy",
+    "enrolled_at": "2026-09-21T11:58:35.383808+00:00"
+  },
+  "rahul": {
+    "name": "rahul",
+    "sample_count": 8,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/rahul.npy",
+    "enrolled_at": "2026-09-21T11:58:37.400634+00:00"
+  },
+  "sanvi": {
+    "name": "sanvi",
+    "sample_count": 4,
+    "embedding_dim": 512,
+    "npy_file": "embeddings/sanvi.npy",
+    "enrolled_at": "2026-09-21T11:58:38.291022+00:00"
+  }
+}

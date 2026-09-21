@@ -21,4 +21,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . ./
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
-CMD uvicorn backend.api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn backend.api.main:app --host 0.0.0.0 --port ${PORT:-7860}

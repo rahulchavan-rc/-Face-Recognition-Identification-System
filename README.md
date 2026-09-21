@@ -1,3 +1,12 @@
+---
+title: Face Recognition Identification System
+emoji: face
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+---
+
 # Face Recognition Identification System
 
 An embedding-based face recognition system using **ArcFace** and **SCRFD** via InsightFace.

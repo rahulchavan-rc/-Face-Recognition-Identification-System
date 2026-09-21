@@ -210,6 +210,11 @@ cd frontend
 npm install
 ```
 
+GitHub Pages can host the frontend only. To run the frontend and FastAPI backend under
+one URL, connect this repository to Render using `render.yaml`. The Docker image
+builds the React app into FastAPI, so the deployed service exposes the dashboard at
+`/` and the API at `/api`. No `VITE_API_BASE_URL` variable is needed for this setup.
+
 ---
 
 ## Usage
